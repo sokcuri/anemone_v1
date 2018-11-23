@@ -4810,6 +4810,7 @@ DWORD WINAPI FileTransThread(LPVOID lpParam)
 		else
 		{
 			list = list_org;
+			v_line_info.push_back(0);
 		}
 
 		SendMessage(hDlg, WM_COMMAND, ID_FILE_TRANSPROG_LISTSIZE, (LPARAM)list.size());
