@@ -80,6 +80,9 @@ char* __stdcall J2K_Translate_Web(int data0, const char *jpStr);
 CRITICAL_SECTION	cs_trans;
 CRITICAL_SECTION	cs_ezdic;
 
+// UTF-8 변환 (heavy init)
+std::locale utf8_read{ std::locale::empty(), new std::codecvt_utf8<wchar_t, 0x10ffff, std::consume_header> };
+std::locale utf8_write{ std::locale::empty(), new std::codecvt_utf8<wchar_t, 0x10ffff, std::generate_header> };
 
 int APIENTRY _tWinMain(
 		__in HINSTANCE hInstance,
@@ -4666,70 +4669,48 @@ DWORD WINAPI FileTransThread(LPVOID lpParam)
 
 	ShowWindow(hDlg, true);
 
-	auto FT_LoadFile = [&hDlg, &FT](std::wstring &inputFile, std::wstring &outputFile) -> std::pair<FILE *, FILE*> {
-		FILE *fpw, *fpr;
-		if (_wfopen_s(&fpr, inputFile.c_str(), L"rt,ccs=UTF-8") != 0)
-		{
-			std::wstringstream wss;
-			wss << L"원문 파일이 존재하지 않거나 읽기 권한이 없습니다 :\r\n\r\n";
-			wss << inputFile;
-			MessageBox(hDlg, wss.str().c_str(), L"아네모네", 0);
-			DestroyWindow(hDlg);
-			return std::make_pair(nullptr, nullptr);
-		}
-
-		if (_wfopen_s(&fpw, outputFile.c_str(), L"wt,ccs=UTF-8") != 0)
-		{
-			std::wstringstream wss;
-			wss << L"저장될 파일이 사용중이거나 쓰기 권한이 없습니다 :\r\n\r\n";
-			wss << outputFile;
-			MessageBox(hDlg, wss.str().c_str(), L"아네모네", 0);
-			DestroyWindow(hDlg);
-			fclose(fpr);
-			return std::make_pair(nullptr, nullptr);
-		}
-
-		return std::make_pair(fpr, fpw);
-	};
-
 	auto FT_CalculateLine = [&FT]() -> int
 	{
-		wchar_t str[1000];
 		int lines = 0;
-		for (auto fp : FT->v_fpr)
+		for (const std::wstring& file : FT->v_inputFiles)
 		{
-			for (int i = 0; fgetws(str, 1000, fp) != NULL; i++)
-			{
-				lines++;
-			}
+			std::wifstream src{ file };
+			lines += std::count(std::istreambuf_iterator<wchar_t>(src), {}, '\n');
 		}
-
-		for (auto fp : FT->v_fpr)
-			fseek(fp, 0, SEEK_SET);
-
 		return lines;
 	};
 
 	auto FT_Translating = [&hDlg, &FT](int idx, int &g_curr) {
-		int nLines;
-		wchar_t wstr[1024];
-		auto fpr = FT->v_fpr[idx];
-		auto fpw = FT->v_fpw[idx];
 		std::wstring inputFileName = FT->v_inputFiles[idx];
 		std::wstring outputFileName = FT->v_outputFiles[idx];
 		std::wstring filename = inputFileName;
 		filename = filename.substr(filename.rfind(L"\\") + 1);
 
 		std::wstring input;
-		for (nLines = 0; fgetws(wstr, 1000, fpr) != NULL; nLines++) {
-			input.append(wstr);
-			//input.append(L"\r\n");
+		{
+			std::wifstream fsr{ inputFileName };
+			if (!fsr)
+			{
+				std::wstringstream wss;
+				wss << L"원문 파일이 존재하지 않거나 읽기 권한이 없습니다 :\r\n\r\n";
+				wss << inputFileName;
+				MessageBox(hDlg, wss.str().c_str(), L"아네모네", 0);
+				return -1;
+			}
+			auto _ = fsr.imbue(utf8_read);
+			input = (std::wstringstream{} << fsr.rdbuf()).str();
+
+			// 번역 전 파일 테스트
+			if (!std::wofstream{ outputFileName })
+			{
+				std::wstringstream wss;
+				wss << L"저장될 파일이 사용 중이거나 쓰기 권한이 없습니다:\r\n\r\n";
+				wss << outputFileName;
+				MessageBox(hDlg, wss.str().c_str(), L"아네모네", 0);
+				return -1;
+			}
 		}
-
-		fclose(fpr);
-
-		std::wstringstream content;
-		std::wstring proclog;
+		int nLines = std::count(input.begin(), input.end(), L'\n');
 
 		Elapsed_Prepare = 0;
 		Elapsed_Translate = 0;
@@ -4915,6 +4896,16 @@ DWORD WINAPI FileTransThread(LPVOID lpParam)
 			return -1;
 		}
 
+		std::wofstream fsw{ outputFileName };
+		if (!fsw)
+		{
+			std::wstringstream wss;
+			wss << L"저장될 파일이 사용 중이거나 쓰기 권한이 없습니다:\r\n\r\n";
+			wss << outputFileName;
+			MessageBox(hDlg, wss.str().c_str(), L"아네모네", 0);
+			return -1;
+		}
+		auto _ = fsw.imbue(utf8_write);
 		for (iter = list_org.begin(), iter_trans = list_trans.begin(); iter != list_org.end(); iter++, iter_trans++)
 		{
 			if (FT->WriteType != 0)
@@ -4923,64 +4914,43 @@ DWORD WINAPI FileTransThread(LPVOID lpParam)
 				if (FT->NoTransLineFeed && (*iter_trans == L"\n" || *iter_trans == L"\r\n") ||
 					std::next(iter, 1) == list_org.end() && *iter_trans == L"")
 				{
-					fwrite((*iter).c_str(), sizeof(wchar_t), wcslen((*iter).c_str()), fpw);
+					fsw << *iter;
 				}
 				// 이 라인이 마지막 라인인 경우 원문에 \r\n을 붙여준다
 				else if (std::next(iter, 1) == list_org.end())
 				{
-					fwrite((*iter).c_str(), sizeof(wchar_t), wcslen((*iter).c_str()), fpw);
-					fwrite(L"\r\n", sizeof(wchar_t), wcslen(L"\r\n"), fpw);
-					fwrite((*iter_trans).c_str(), sizeof(wchar_t), wcslen((*iter_trans).c_str()), fpw);
+					fsw << *iter << L"\r\n" << *iter_trans;
 					break;
 				}
 				else
 				{
-					fwrite((*iter).c_str(), sizeof(wchar_t), wcslen((*iter).c_str()), fpw);
-					fwrite((*iter_trans).c_str(), sizeof(wchar_t), wcslen((*iter_trans).c_str()), fpw);
-
+					fsw << *iter << *iter_trans;
 					// 출력 설정이 원문/번역문 + 개행인 경우 개행 처리
-					if (FT->WriteType == 2) fwrite(L"\r\n", sizeof(wchar_t), wcslen(L"\r\n"), fpw);
+					if (FT->WriteType == 2)
+					{
+						fsw << L"\r\n";
+					}
 				}
 			}
-			else fwrite((*iter_trans).c_str(), sizeof(wchar_t), wcslen((*iter_trans).c_str()), fpw);
+			else
+			{
+				fsw << *iter_trans;
+			}
 		}
 
-		fclose(fpw);
 		return 0;
 	};
 
 	auto FT_CleanUp = [&hDlg, &FT]()
 	{
-		for (FILE *fp : FT->v_fpr)
-		{
-			fclose(fp);
-		}
-		for (FILE *fp : FT->v_fpw)
-		{
-			fclose(fp);
-		}
-
 		delete FT;
 		DestroyWindow(hDlg);
 		return false;
 	};
 
-	// 우선 모든 입출력 파일의 핸들을 잡는다
-	for (size_t i = 0; i < FT->v_inputFiles.size(); i++)
-	{
-		auto ret = FT_LoadFile(FT->v_inputFiles[i], FT->v_outputFiles[i]);
-		if (ret.first == nullptr || ret.second == nullptr)
-		{
-			FT_CleanUp();
-			return false;
-		}
-		FT->v_fpr.push_back(ret.first);
-		FT->v_fpw.push_back(ret.second);
-	}
-	
 	// 전체 라인 세기
 	int totalLines = FT_CalculateLine();
-	SendMessage(hDlg, WM_COMMAND, ID_FILE_TRANSPROG_TOTALCOUNT, (LPARAM)FT->v_fpr.size());
+	SendMessage(hDlg, WM_COMMAND, ID_FILE_TRANSPROG_TOTALCOUNT, (LPARAM)FT->v_inputFiles.size());
 	SendMessage(hDlg, WM_COMMAND, ID_FILE_TRANSPROG_TOTALSIZE, (LPARAM)totalLines);
 
 	// 전체 현재 라인 수
