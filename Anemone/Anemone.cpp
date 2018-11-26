@@ -3520,7 +3520,7 @@ INT_PTR CALLBACK FileTransWinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 			ofn.lpstrFileTitle = NULL;
 			ofn.nMaxFileTitle = 0;
 			ofn.lpstrInitialDir = NULL;
-			ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+			ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_NOVALIDATE;
 
 			if (inputFile.size())
 				wcscpy(szFile, inputFile[0].c_str());
@@ -3534,44 +3534,40 @@ INT_PTR CALLBACK FileTransWinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 				std::wstring output_file_info;
 				wchar_t* str = ofn.lpstrFile;
 				std::wstring directory = str;
-				if (directory[directory.length() - 1] == L'\\')
-					directory.substr(0, directory.length() - 1);
 
 				str += (directory.length() + 1);
-				int filesNumber = 0;
-				while (*str) {
-					std::wstring filename = str;
-					std::wstring input_path = directory + L"\\" + filename;
-					std::wstring output_path = directory + L"\\" + filename.substr(0, filename.rfind(L'.')) + L"_번역.txt";
-					inputFile.push_back(input_path);
-					outputFile.push_back(output_path);
-
+				// 경로가 하나인 경우엔 폴더일 수도 있음
+				if (!*str)
+				{
+					// 폴더가 아니면
+					if (EnumerateFiles(directory, inputFile) != ERROR_SUCCESS)
+					{
+						// 파일이므로 추가
+						inputFile.push_back(directory);
+					}
+				}
+				else
+				{
+					while (*str)
+					{
+						std::wstring path = directory + L"\\" + str;
+						inputFile.push_back(path);
+						str += path.length() - directory.length();
+					}
+				}
+				for (auto& file : inputFile)
+				{
+					std::wstring output_path = file.substr(0, file.rfind(L'.')) + L"_번역.txt";
 					if (input_file_info.length())
 					{
 						input_file_info += L", ";
 						output_file_info += L", ";
 					}
-					input_file_info += input_path;
+					input_file_info += file;
 					output_file_info += output_path;
-
-					str += (filename.length() + 1);
-					filesNumber++;
+					outputFile.push_back(move(output_path));
 				}
-
-				if (!input_file_info.length())
-				{
-					std::wstring input_path = ofn.lpstrFile;
-					std::wstring directory = input_path.substr(0, input_path.rfind(L'\\'));
-					std::wstring filename = input_path.substr(input_path.rfind(L'\\') + 1);
-					std::wstring output_path = input_path.substr(0, input_path.rfind(L'\\')) + L"\\" + filename.substr(0, filename.rfind(L'.')) + L"_번역" + L".txt";
-
-					input_file_info = input_path;
-					output_file_info = output_path;
-
-					inputFile.push_back(input_path);
-					outputFile.push_back(output_path);
-					filesNumber++;
-				}
+				int filesNumber = inputFile.size();
 				
 				SetDlgItemText(hWnd, IDC_FILE_TRANSWIN_LOAD, input_file_info.c_str());
 				SetDlgItemText(hWnd, IDC_FILE_TRANSWIN_SAVE, output_file_info.c_str());

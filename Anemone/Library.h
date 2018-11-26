@@ -15,3 +15,4 @@ static BOOL CALLBACK OnGetWindowByProcess(HWND hwnd, LPARAM lParam);
 void ExecuteFile(const std::wstring &filename);
 bool ColorDialog(HWND hWnd, CHOOSECOLOR &cc, DWORD ColorVar);
 bool FontDialog(HWND hWnd, CHOOSEFONT &cf, LOGFONT &lf);
+DWORD EnumerateFiles(const std::wstring& path, std::vector<std::wstring>& files);

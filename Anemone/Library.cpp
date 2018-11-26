@@ -296,3 +296,38 @@ bool FontDialog(HWND hWnd, CHOOSEFONT &cf, LOGFONT &lf)
 	}
 	return false;
 }
+
+DWORD EnumerateFiles(const std::wstring& path, std::vector<std::wstring>& files)
+{
+	std::wstring buf{ path };
+	buf += L"\\*";
+	WIN32_FIND_DATA ffd;
+	HANDLE hFind = FindFirstFile(buf.c_str(), &ffd);
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		return GetLastError();
+	}
+
+	do
+	{
+		if (_tcscmp(ffd.cFileName, _T(".")) == 0 || _tcscmp(ffd.cFileName, _T("..")) == 0)
+		{
+			continue;
+		}
+		buf = path;
+		buf += L'\\';
+		buf += ffd.cFileName;
+		if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			EnumerateFiles(buf, files);
+		}
+		else
+		{
+			files.push_back(move(buf));
+		}
+	} while (FindNextFile(hFind, &ffd) != 0);
+
+	DWORD err = GetLastError();
+	FindClose(hFind);
+	return err;
+}
