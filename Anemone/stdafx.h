@@ -28,6 +28,8 @@
 #include <process.h>
 
 // C 런타임 헤더 파일입니다.
+#include <codecvt>
+#include <fstream>
 #include <ios>
 #include <tchar.h>
 #include <vector>
@@ -178,8 +180,6 @@ typedef struct
 {
 	std::vector<std::wstring> v_inputFiles;
 	std::vector<std::wstring> v_outputFiles;
-	std::vector<FILE *> v_fpw;
-	std::vector<FILE *> v_fpr;
 	int WriteType;
 	bool NoTransLineFeed;
 	int StartTickCount;
